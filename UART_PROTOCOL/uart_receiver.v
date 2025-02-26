@@ -26,8 +26,8 @@ always @(posedge system_clk or posedge rst) begin
         data_out <= 0;
         rx_done <= 0;
         data_counter <= 0;
-        flag_state <= 2'b00;
         shift_register <= 0;
+        flag_state <= 2'b00;
     end
     else begin
         case (state)
@@ -73,7 +73,6 @@ always @(posedge system_clk or posedge rst) begin
             
             default: begin
                 state <= IDLE;
-                flag_state <= 2'b00;
             end
         endcase 
     end
