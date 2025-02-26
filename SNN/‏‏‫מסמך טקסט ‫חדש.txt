@@ -1,0 +1,224 @@
+%reset -f
+#%%
+%matplotlib inline
+import matplotlib.pyplot as plt
+import numpy as np
+import nengo
+from nengo.dists import Uniform
+
+# Define the model
+model = nengo.Network(label="Two Neurons")
+with model:
+    # Define the ensemble of neurons
+    neurons = nengo.Ensemble(
+        n_neurons=2,  # Number of neurons
+        dimensions=1,  # Representing a scalar
+        intercepts=Uniform(-0.5, -0.5),  # Set the intercepts at -0.5
+        max_rates=Uniform(100, 100),  # Set the max firing rate at 10 Hz
+        neuron_type=nengo.LIF(tau_rc=0.02, tau_ref=0.002),  # Default LIF neurons
+        encoders=[[1], [-1]],  # One 'on' and one 'off' neuron
+    )
+
+    # Input signal (sine wave)
+    sin = nengo.Node(lambda t: np.sin(8 * t))
+
+    # Connect the input to the neurons
+    nengo.Connection(sin, neurons, synapse=None)
+
+    sin_probe = nengo.Probe(sin)  # The original input
+    spikes = nengo.Probe(neurons.neurons)  # Raw spikes from each neuron
+    voltage = nengo.Probe(neurons.neurons, "voltage")
+    decoded_output = nengo.Probe(neurons, synapse=None)
+
+# Create a simulator and run
+with nengo.Simulator(model, optimize=False) as sim:
+    sim.signals[sim.model.sig[neurons.neurons]["voltage"]][:] = 0.0 #set initial membrane voltage to zero (all neurons), else it would be random.
+    sim.run(1)
+
+
+nengo_vol1=sim.data[voltage][:,0]
+nengo_vol2=sim.data[voltage][:,1]
+
+
+plt.figure(figsize=(12, 6))
+plt.plot(sim.trange(), sim.data[sin_probe])
+plt.title("Input")
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(sim.trange(), nengo_vol1+1)
+plt.plot(sim.trange(), nengo_vol2)
+plt.title("Voltage")
+plt.grid(True)
+plt.show()
+
+# Plot the results
+plt.figure(figsize=(12, 6))
+plt.plot(sim.trange(), sim.data[spikes][:,0] + 1000)
+plt.plot(sim.trange(), sim.data[spikes][:,1])
+plt.title("Raw Spikes")
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(sim.trange(), sim.data[decoded_output])
+plt.title("Decoded Output")
+plt.grid(True)
+plt.show()
+
+
+
+#%%
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Ensure consistent precision across all calculations
+# np.random.seed(42)
+
+# Define parameters
+dt = float(0.001)  # Time step (1 ms)
+duration = 1.0  # Total simulation time (1 second)
+time = np.arange(dt, duration+dt, dt)  # Time array
+
+# Neuron parameters
+n_neurons = 2
+tau_rc = 0.02  # Membrane time constant (20 ms)
+tau_ref = 0.002 # Refractory period (2 ms)
+amplitude = 1.0
+min_voltage = 0.0
+
+# Input signal: sin wave
+input_signal = np.sin(8 * time)
+
+# Initialize state variables
+voltage = np.zeros(n_neurons)  # Membrane potential
+refractory_time = np.zeros(n_neurons)  # Refractory timer
+
+# Initialize neuron-specific parameters
+intercepts = np.array([-0.5, -0.5])  # Intercepts for each neuron
+max_rates = np.array([100.0, 100.0])  # Max firing rates (Hz)
+encoders = np.array([1, -1])  # Encoders for each neuron
+
+# Accurate gain and bias computation for LIF neurons
+def compute_gain_bias_lif(max_rates, intercepts, tau_rc, tau_ref):
+    # max_rates = np.array(max_rates, dtype=float, copy=False, ndmin=1)
+    # intercepts = np.array(intercepts, dtype=float, copy=False, ndmin=1)
+
+    # inv_tau_ref = 1.0 / tau_ref
+    if tau_ref > 0:
+        inv_tau_ref = 1.0 / tau_ref 
+    else:
+        inv_tau_ref = np.inf
+        
+    # if not np.all(max_rates < inv_tau_ref):
+    #     raise ValueError(
+    #         f"Max rates must be below the inverse refractory period ({inv_tau_ref:.3f})."
+    #     )
+
+    x = 1.0 / (1 - np.exp((tau_ref - (1.0 / max_rates)) / tau_rc))
+    gain = (1 - x) / (intercepts - 1.0)
+    bias = 1 - gain * intercepts
+
+    return gain, bias
+
+gain, bias = compute_gain_bias_lif(max_rates, intercepts, tau_rc, tau_ref)
+
+# Outputs
+spike_raster = np.zeros((len(time), n_neurons), dtype=float)
+my_voltage_history = np.zeros((len(time), n_neurons), dtype=float)
+
+# LIF step function with Nengo precision
+def lif_neuron_step(dt, J, voltage, refractory_time, tau_rc, tau_ref, min_voltage, amplitude):
+
+    """Simulate one time step of LIF neuron dynamics using Nengo precision."""
+    # Reduce refractory time
+    refractory_time -= dt
+
+    # Compute effective time step
+    delta_t = np.clip(dt - refractory_time, 0, dt)
+
+    # Update voltage using Nengo's precise exponential decay
+    voltage -= (J - voltage) * np.expm1(-delta_t / tau_rc)
+
+    # Determine which neurons spiked
+    spiked_mask = voltage > 1
+
+    # Calculate spike output (scaled by amplitude)
+    output = np.zeros_like(voltage, dtype=float)
+    output[spiked_mask] = amplitude / dt
+    
+        
+    # Set spiked voltages to zero and calculate spike timing
+    t_spike = dt + tau_rc * np.log1p(
+        -(voltage[spiked_mask] - 1) / (J[spiked_mask] - 1)
+    )
+    voltage[spiked_mask] = 0
+
+    # Update refractory times for spiked neurons
+    refractory_time[spiked_mask] = tau_ref + t_spike
+
+    # Ensure minimum voltage is respected
+    voltage[voltage < min_voltage] = min_voltage
+
+    return output, voltage, refractory_time
+
+import numpy as np
+
+
+
+# Simulation loop
+for t_idx, t in enumerate(time):
+    # Compute input current (x -> gain * x + bias)
+    J = gain * (encoders * input_signal[t_idx]) + bias
+    # Update LIF neurons
+    spikes, voltage, refractory_time = lif_neuron_step(
+        dt, J, voltage, refractory_time, tau_rc, tau_ref, min_voltage, amplitude
+    )
+
+    # Record spikes and voltage
+    spike_raster[t_idx] = spikes
+    my_voltage_history[t_idx] = voltage
+    
+plt.figure(figsize=(12, 6))
+plt.plot(time, input_signal)
+plt.title("Input")
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(time, my_voltage_history[:,0]+1)
+plt.plot(time, my_voltage_history[:,1])
+plt.title("Voltage")
+plt.grid(True)
+plt.show()
+
+# Plot the results
+plt.figure(figsize=(12, 6))
+plt.plot(time, spike_raster[:,0] + 1000)
+plt.plot(time, spike_raster[:,1])
+plt.title("Raw Spikes")
+plt.grid(True)
+plt.show()
+
+
+#%%
+my_vol1 = my_voltage_history[:,0]
+my_vol2 = my_voltage_history[:,1]
+
+#%%
+if np.array_equal(nengo_vol1, my_vol1):
+    print("The vectors are equal.")
+else:
+    print("The vectors are not equal.")
+
+#%%
+nengo_vol1[144]
+#%%
+my_vol1[144]
+#%%
+for i in range(len(nengo_vol1)):
+    if nengo_vol1[i]==my_vol1[i]:
+        print(i)
+    else:
+        print(i,'not equal')
