@@ -54,7 +54,7 @@ always @(posedge system_clk or posedge rst) begin
             READ: begin
                 flag_state <= 2'b10;
                 if (uart_tick) begin
-                    shift_register <= {rx_data, shift_register[7:1]}; // push from left (LSB receoieved first)
+                    shift_register <= {rx_data, shift_register[7:1]}; // push from left (LSB received first)
                     if (data_counter == 7)
                         state <= STOP;
                     else
