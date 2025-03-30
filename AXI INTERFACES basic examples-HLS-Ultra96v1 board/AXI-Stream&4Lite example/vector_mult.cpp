@@ -6,15 +6,15 @@ typedef hls::axis<float, 0, 0, 0> AXI_STREAM_DATA;
 void vector_mult(hls::stream<AXI_STREAM_DATA> &input_stream,
                  hls::stream<AXI_STREAM_DATA> &output_stream,
                  const float multiplier) {
-#pragma HLS INTERFACE axis port=input_stream register_mode=off
-#pragma HLS INTERFACE axis port=output_stream
-#pragma HLS INTERFACE s_axilite port=multiplier bundle=CTRL_BUS
-#pragma HLS INTERFACE s_axilite port=return bundle=CTRL_BUS
+	#pragma HLS INTERFACE axis port=input_stream register_mode=off
+	#pragma HLS INTERFACE axis port=output_stream
+	#pragma HLS INTERFACE s_axilite port=multiplier bundle=CTRL_BUS
+	#pragma HLS INTERFACE s_axilite port=return bundle=CTRL_BUS
 
     AXI_STREAM_DATA in_data, out_data;
 
     while (!input_stream.empty()) {
-#pragma HLS PIPELINE II=1
+		#pragma HLS PIPELINE II=1
         // Read input data
         in_data = input_stream.read();
 
